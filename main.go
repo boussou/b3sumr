@@ -297,6 +297,7 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 
 	var output *os.File
 	var err error
+	var totalFiles, processedFiles, errorFiles int
 
 	if config.output != "" {
 		output, err = os.Create(config.output)
@@ -310,13 +311,16 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 	}
 
 	for result := range results {
+		totalFiles++
 		if result.err != nil {
+			errorFiles++
 			if !config.status {
 				fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", result.filename, result.err)
 			}
 			continue
 		}
 
+		processedFiles++
 		var line string
 		if config.tag {
 			line = fmt.Sprintf("BLAKE3 (%s) = %s\n", result.filename, result.hash)
@@ -330,6 +334,15 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 
 		output.WriteString(line)
 	}
+
+	// Display summary
+	fmt.Fprintf(os.Stderr, "\n#### Summary\n")
+	fmt.Fprintf(os.Stderr, "Total files processed: %d\n", totalFiles)
+	fmt.Fprintf(os.Stderr, "Files hashed: %d\n", processedFiles)
+	if errorFiles > 0 {
+		fmt.Fprintf(os.Stderr, "Files with errors: %d\n", errorFiles)
+	}
+	fmt.Fprintf(os.Stderr, "#### Ended\n")
 }
 
 func checkMode(config *Config, hashFiles []string) error {
@@ -357,6 +370,7 @@ func checkMode(config *Config, hashFiles []string) error {
 	}
 
 	var allOk = true
+	var totalFiles, okFiles, failedFiles int
 
 	for _, hashFile := range hashFiles {
 		var file *os.File
@@ -387,7 +401,11 @@ func checkMode(config *Config, hashFiles []string) error {
 			}
 
 			ok := checkLine(line, config, lineNum, hashFile, output)
-			if !ok {
+			totalFiles++
+			if ok {
+				okFiles++
+			} else {
+				failedFiles++
 				allOk = false
 			}
 		}
@@ -399,6 +417,17 @@ func checkMode(config *Config, hashFiles []string) error {
 			allOk = false
 		}
 	}
+
+	// Display summary
+	//	if !config.quiet && !config.status {
+	fmt.Fprintf(os.Stderr, "\n#### Summary\n")
+	fmt.Fprintf(os.Stderr, "Total files checked: %d\n", totalFiles)
+	fmt.Fprintf(os.Stderr, "Files OK: %d\n", okFiles)
+	if failedFiles > 0 {
+		fmt.Fprintf(os.Stderr, "Files FAILED: %d\n", failedFiles)
+	}
+	fmt.Fprintf(os.Stderr, "#### Ended\n")
+	//	}
 
 	if !allOk {
 		return fmt.Errorf("checksum verification failed")
