@@ -48,9 +48,13 @@ type HashResult struct {
 
 func main() {
 	config := parseFlags()
-	
+
 	if config.workers <= 0 {
 		config.workers = runtime.NumCPU()
+	}
+
+	if !config.quiet && !config.status {
+		fmt.Printf("Using %d CPU workers\n", config.workers)
 	}
 
 	args := flag.Args()
@@ -261,7 +265,7 @@ func hashReader(reader io.Reader, config *Config) (string, error) {
 	}
 
 	hash := hasher.Sum(nil)
-	
+
 	// Truncate to specified length if needed
 	if config.length < 256 && config.length > 0 {
 		bitLength := config.length / 8
@@ -315,7 +319,7 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 
 func checkMode(config *Config, hashFiles []string) error {
 	if !config.quiet && !config.status {
-		fmt.Fprintf(os.Stderr, "b3sumr v%s Copyright (C) 2024 HacKan (https://hackan.net)\n\n", version)
+		fmt.Fprintf(os.Stderr, "b3sumr v%s GPL v3\n\n", version)
 		if config.output != "" {
 			fmt.Fprintf(os.Stderr, "Saving results in %s\n", config.output)
 		}
@@ -420,7 +424,11 @@ func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
 	}
 
 	// Compare hashes
-	if strings.ToLower(actualHash) == strings.ToLower(expectedHash) {
+	// Why EqualFold is better:
+	// Unicode-safe: Handles international characters correctly
+	// More efficient: No temporary string allocation
+	// Go best practice: strings.EqualFold() is the best way for case-insensitive cmp
+	if strings.EqualFold(actualHash, expectedHash) {
 		if !config.quiet && !config.status {
 			fmt.Printf("%s: OK\n", filename)
 		}
@@ -434,7 +442,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
 }
 
 func showHelpText() {
-	fmt.Printf(`b3sumr v%s Copyright (C) 2024 HacKan (https://hackan.net)
+	fmt.Printf(`b3sumr v%s GPL v3
 
 Usage: b3sumr [OPTION]... [FILE or DIRECTORY]...
 
@@ -486,7 +494,7 @@ func showLicenseText() {
 	fmt.Printf(`b3sumr: recursive BLAKE3 hash maker and verifier
 Licence GPL Version 3, 29 June 2007
 
-Fork rewrite of original b2rsum by HacKan (https://hackan.net)
+Fork rewrite of original b2rsum by HacKan (https://github.com/HacKanCuBa/b2rsum)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
