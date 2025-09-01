@@ -336,6 +336,19 @@ func checkMode(config *Config, hashFiles []string) error {
 		}
 	}
 
+	// Setup output file for check results
+	var output *os.File
+	var err error
+	if config.output != "" {
+		output, err = os.Create(config.output)
+		if err != nil {
+			return fmt.Errorf("error creating output file: %v", err)
+		}
+		defer output.Close()
+	} else {
+		output = os.Stdout
+	}
+
 	var allOk = true
 
 	for _, hashFile := range hashFiles {
@@ -362,11 +375,11 @@ func checkMode(config *Config, hashFiles []string) error {
 		for scanner.Scan() {
 			lineNum++
 			line := strings.TrimSpace(scanner.Text())
-			if line == "" || strings.HasPrefix(line, "#") {
+			if line == "" || strings.HasPrefix(line, "#") || line == "#### Ended" {
 				continue
 			}
 
-			ok := checkLine(line, config, lineNum, hashFile)
+			ok := checkLine(line, config, lineNum, hashFile, output)
 			if !ok {
 				allOk = false
 			}
@@ -387,7 +400,7 @@ func checkMode(config *Config, hashFiles []string) error {
 	return nil
 }
 
-func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
+func checkLine(line string, config *Config, lineNum int, hashFile string, output *os.File) bool {
 	// Parse line format: hash mode filename
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
@@ -441,12 +454,12 @@ func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
 	// Go best practice: strings.EqualFold() is the best way for case-insensitive cmp
 	if strings.EqualFold(actualHash, expectedHash) {
 		if !config.quiet && !config.status {
-			fmt.Printf("%s: OK\n", filename)
+			fmt.Fprintf(output, "%s: OK\n", filename)
 		}
 		return true
 	} else {
 		if !config.status {
-			fmt.Fprintf(os.Stderr, "%s: FAILED\n", filename)
+			fmt.Fprintf(output, "%s: FAILED\n", filename)
 		}
 		return false
 	}
