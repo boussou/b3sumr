@@ -2,7 +2,7 @@ PREFIX ?= /usr
 DESTDIR ?=
 BINDIR ?= $(PREFIX)/bin
 
-BINARY_NAME = b3rsum
+BINARY_NAME = b3sumr
 SOURCE_FILES = main.go
 
 .PHONY: all build clean install uninstall test fmt vet

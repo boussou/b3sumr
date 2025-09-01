@@ -80,8 +80,8 @@ func parseFlags() *Config {
 
 	flag.BoolVar(&config.check, "c", false, "read BLAKE3 sums from the FILEs and check them")
 	flag.BoolVar(&config.check, "check", false, "read BLAKE3 sums from the FILEs and check them")
-	flag.StringVar(&config.output, "o", "", "output to FILE instead of standard output")
-	flag.StringVar(&config.output, "output", "", "output to FILE instead of standard output")
+	flag.StringVar(&config.output, "o", "BLAKE3SUMS", "output to FILE instead of standard output")
+	flag.StringVar(&config.output, "output", "BLAKE3SUMS", "output to FILE instead of standard output")
 	flag.BoolVar(&config.quiet, "q", false, "quiet mode")
 	flag.BoolVar(&config.quiet, "quiet", false, "quiet mode")
 	flag.BoolVar(&config.status, "s", false, "very quiet mode")
@@ -109,7 +109,7 @@ func parseFlags() *Config {
 	flag.Parse()
 
 	if showVersion {
-		fmt.Printf("b3rsum v%s\n", version)
+		fmt.Printf("b3sumr v%s\n", version)
 		os.Exit(0)
 	}
 
@@ -135,7 +135,7 @@ func parseFlags() *Config {
 
 func createMode(config *Config, paths []string) error {
 	if !config.quiet && !config.status {
-		fmt.Fprintf(os.Stderr, "b3rsum v%s Copyright (C) 2024 HacKan (https://hackan.net)\n\n", version)
+		fmt.Fprintf(os.Stderr, "b3sumr v%s GPL v3\n\n", version)
 		if config.output != "" {
 			fmt.Fprintf(os.Stderr, "Saving results in %s\n", config.output)
 		}
@@ -216,6 +216,18 @@ func createMode(config *Config, paths []string) error {
 
 	// Wait for result collector to finish
 	collectorWg.Wait()
+
+	// After all goroutines have finished, print final message
+	// this is intended for (tail -f tracking)
+	if config.output != "" {
+		f, err := os.OpenFile(config.output, os.O_APPEND|os.O_WRONLY, 0644)
+		if err == nil {
+			defer f.Close()
+			f.WriteString("#### Ended\n")
+		}
+	} else {
+		fmt.Println("#### Ended")
+	}
 
 	return nil
 }
@@ -303,7 +315,7 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 
 func checkMode(config *Config, hashFiles []string) error {
 	if !config.quiet && !config.status {
-		fmt.Fprintf(os.Stderr, "b3rsum v%s Copyright (C) 2024 HacKan (https://hackan.net)\n\n", version)
+		fmt.Fprintf(os.Stderr, "b3sumr v%s Copyright (C) 2024 HacKan (https://hackan.net)\n\n", version)
 		if config.output != "" {
 			fmt.Fprintf(os.Stderr, "Saving results in %s\n", config.output)
 		}
@@ -422,9 +434,9 @@ func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
 }
 
 func showHelpText() {
-	fmt.Printf(`b3rsum v%s Copyright (C) 2024 HacKan (https://hackan.net)
+	fmt.Printf(`b3sumr v%s Copyright (C) 2024 HacKan (https://hackan.net)
 
-Usage: b3rsum [OPTION]... [FILE or DIRECTORY]...
+Usage: b3sumr [OPTION]... [FILE or DIRECTORY]...
 
 Print or check BLAKE3 checksums recursively.
 If no FILE or DIRECTORY is indicated, or it's a dot (.), then the current
@@ -464,15 +476,17 @@ indicating input mode ('*' for binary, ' ' for text), and name for each FILE.
 
 This program comes with ABSOLUTELY NO WARRANTY.
 This is free software, and you are welcome to redistribute it under certain
-conditions; type 'b3rsum --license' for details.
+conditions; type 'b3sumr --license' for details.
 
-More information may be found in the b3rsum(1) man page.
+More information may be found in the b3sumr(1) man page.
 `, version, defaultOutputFile, runtime.NumCPU())
 }
 
 func showLicenseText() {
-	fmt.Printf(`b3rsum: recursive BLAKE3 hash maker and verifier
-Copyright (C) 2024 HacKan (https://hackan.net)
+	fmt.Printf(`b3sumr: recursive BLAKE3 hash maker and verifier
+Licence GPL Version 3, 29 June 2007
+
+Fork rewrite of original b2rsum by HacKan (https://hackan.net)
 
 This program is free software: you can redistribute it and/or modify
 it under the terms of the GNU General Public License as published by
