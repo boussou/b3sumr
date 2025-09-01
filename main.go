@@ -59,7 +59,11 @@ func main() {
 
 	args := flag.Args()
 	if len(args) == 0 {
-		args = []string{"."}
+		if config.check {
+			args = []string{defaultOutputFile} // Use BLAKE3SUMS as default input for check mode
+		} else {
+			args = []string{"."} // Use current directory for create mode
+		}
 	}
 
 	var err error
@@ -140,8 +144,8 @@ func parseFlags() *Config {
 	}
 
 	// Handle output file logic
-	if config.output == "" {
-		// No output specified, use default
+	if config.output == "" && !config.check {
+		// No output specified and not in check mode, use default
 		config.output = defaultOutputFile
 	}
 
@@ -331,8 +335,11 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 func checkMode(config *Config, hashFiles []string) error {
 	if !config.quiet && !config.status {
 		fmt.Fprintf(os.Stderr, "b3sumr v%s GPL v3\n\n", version)
+		if len(hashFiles) > 0 {
+			fmt.Fprintf(os.Stderr, "Reading checksums from %s\n", hashFiles[0])
+		}
 		if config.output != "" {
-			fmt.Fprintf(os.Stderr, "Saving results in %s\n", config.output)
+			fmt.Fprintf(os.Stderr, "Saving check results in %s\n", config.output)
 		}
 	}
 
@@ -485,7 +492,7 @@ Options:
                              successfully verified file
   -s, --status               very quiet mode: output only hashes, no messages;
                              status code shows success
-  -j, --jobs N               number of parallel workers (default: %d)
+  -j, --jobs N               number of parallel workers (default: %d for your CPU)
       --license              show license and exit
       --version              show version information and exit
   -h, --help                 show this text and exit
