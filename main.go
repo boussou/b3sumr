@@ -84,8 +84,8 @@ func parseFlags() *Config {
 
 	flag.BoolVar(&config.check, "c", false, "read BLAKE3 sums from the FILEs and check them")
 	flag.BoolVar(&config.check, "check", false, "read BLAKE3 sums from the FILEs and check them")
-	flag.StringVar(&config.output, "o", "BLAKE3SUMS", "output to FILE instead of standard output")
-	flag.StringVar(&config.output, "output", "BLAKE3SUMS", "output to FILE instead of standard output")
+	flag.StringVar(&config.output, "o", "", "output to FILE instead of standard output, or BLAKE3SUMS if no FILE specified")
+	flag.StringVar(&config.output, "output", "", "output to FILE instead of standard output, or BLAKE3SUMS if no FILE specified")
 	flag.BoolVar(&config.quiet, "q", false, "quiet mode")
 	flag.BoolVar(&config.quiet, "quiet", false, "quiet mode")
 	flag.BoolVar(&config.status, "s", false, "very quiet mode")
@@ -110,6 +110,18 @@ func parseFlags() *Config {
 	flag.BoolVar(&showHelp, "help", false, "show help and exit")
 	flag.BoolVar(&showLicense, "license", false, "show license and exit")
 
+	// Custom handling for -o without filename
+	args := os.Args[1:]
+	for i, arg := range args {
+		if arg == "-o" && (i+1 >= len(args) || strings.HasPrefix(args[i+1], "-")) {
+			// -o is alone or followed by another flag, use default
+			config.output = defaultOutputFile
+			// Replace -o with -o=BLAKE3SUMS to make flag parsing work
+			os.Args[i+1] = "-o=" + defaultOutputFile
+			break
+		}
+	}
+
 	flag.Parse()
 
 	if showVersion {
@@ -128,9 +140,8 @@ func parseFlags() *Config {
 	}
 
 	// Handle output file logic
-	if config.output == "" && flag.Lookup("o").Value.String() == "" {
-		// No output specified
-	} else if config.output == "" {
+	if config.output == "" {
+		// No output specified, use default
 		config.output = defaultOutputFile
 	}
 
