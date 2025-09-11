@@ -438,20 +438,39 @@ func checkMode(config *Config, hashFiles []string) error {
 
 func checkLine(line string, config *Config, lineNum int, hashFile string, output *os.File) bool {
 	// Parse line format: hash mode filename
-	parts := strings.Fields(line)
-	if len(parts) < 2 {
+	// We need to be careful with filenames that contain spaces
+	// The format is: "hash<space>mode<filename>" where mode is a single character
+	
+	// Find the first space (after hash)
+	firstSpace := strings.Index(line, " ")
+	if firstSpace == -1 || firstSpace == len(line)-1 {
 		if config.warn && !config.status {
 			fmt.Fprintf(os.Stderr, "%s:%d: improperly formatted line\n", hashFile, lineNum)
 		}
 		return !config.strict
 	}
 
-	expectedHash := parts[0]
-	filename := strings.Join(parts[1:], " ")
+	expectedHash := line[:firstSpace]
+	remainder := line[firstSpace+1:]
+	
+	// The remainder should be "mode<filename>" where mode is a single character
+	if len(remainder) < 2 {
+		if config.warn && !config.status {
+			fmt.Fprintf(os.Stderr, "%s:%d: improperly formatted line\n", hashFile, lineNum)
+		}
+		return !config.strict
+	}
 
-	// Handle mode character
-	if len(filename) > 0 && (filename[0] == '*' || filename[0] == ' ') {
-		filename = filename[1:]
+	// Extract mode character and filename
+	mode := remainder[0]
+	filename := remainder[1:]
+	
+	// Validate mode character
+	if mode != '*' && mode != ' ' {
+		if config.warn && !config.status {
+			fmt.Fprintf(os.Stderr, "%s:%d: invalid mode character\n", hashFile, lineNum)
+		}
+		return !config.strict
 	}
 
 	// Check if file exists

@@ -32,3 +32,9 @@ So I decided I needed a Go version, so that even when that happens, I still can 
 since Go insures the binary is always standalone. And because on top of that there is a **BLAKE3 lib** in Go, so no need to exec the b3sum.
 
 
+### Build 
+
+Use make 
+
+Or directly rebuild with `go build -o b3sumr main.go`
+
