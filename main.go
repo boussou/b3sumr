@@ -32,6 +32,7 @@ type Config struct {
 	strict        bool
 	warn          bool
 	workers       int
+	showUntracked bool
 }
 
 type FileJob struct {
@@ -105,6 +106,7 @@ func parseFlags() *Config {
 	flag.BoolVar(&config.strict, "strict", false, "exit non-zero for improperly formatted checksum lines")
 	flag.BoolVar(&config.warn, "w", false, "warn about improperly formatted checksum lines")
 	flag.BoolVar(&config.warn, "warn", false, "warn about improperly formatted checksum lines")
+	flag.BoolVar(&config.showUntracked, "show-untracked", false, "show files in filesystem not present in checksum file")
 	flag.IntVar(&config.workers, "j", runtime.NumCPU(), "number of parallel workers")
 	flag.IntVar(&config.workers, "jobs", runtime.NumCPU(), "number of parallel workers")
 
@@ -371,6 +373,7 @@ func checkMode(config *Config, hashFiles []string) error {
 
 	var allOk = true
 	var totalFiles, okFiles, failedFiles int
+	trackedFiles := make(map[string]bool)
 
 	for _, hashFile := range hashFiles {
 		var file *os.File
@@ -400,6 +403,11 @@ func checkMode(config *Config, hashFiles []string) error {
 				continue
 			}
 
+			filename := extractFilename(line)
+			if filename != "" {
+				trackedFiles[filename] = true
+			}
+
 			ok := checkLine(line, config, lineNum, hashFile, output)
 			totalFiles++
 			if ok {
@@ -418,6 +426,12 @@ func checkMode(config *Config, hashFiles []string) error {
 		}
 	}
 
+	// Find untracked files if requested
+	var untrackedFiles []string
+	if config.showUntracked {
+		untrackedFiles = findUntrackedFiles(trackedFiles, config)
+	}
+
 	// Display summary
 	//	if !config.quiet && !config.status {
 	fmt.Fprintf(os.Stderr, "\n#### Summary\n")
@@ -425,6 +439,12 @@ func checkMode(config *Config, hashFiles []string) error {
 	fmt.Fprintf(os.Stderr, "Files OK: %d\n", okFiles)
 	if failedFiles > 0 {
 		fmt.Fprintf(os.Stderr, "Files FAILED: %d\n", failedFiles)
+	}
+	if config.showUntracked && len(untrackedFiles) > 0 {
+		fmt.Fprintf(os.Stderr, "\nFiles not in checksum file: %d\n", len(untrackedFiles))
+		for _, file := range untrackedFiles {
+			fmt.Fprintf(os.Stderr, "  %s\n", file)
+		}
 	}
 	fmt.Fprintf(os.Stderr, "#### Ended\n")
 	//	}
@@ -434,6 +454,45 @@ func checkMode(config *Config, hashFiles []string) error {
 	}
 
 	return nil
+}
+
+func extractFilename(line string) string {
+	firstSpace := strings.Index(line, " ")
+	if firstSpace == -1 || firstSpace == len(line)-1 {
+		return ""
+	}
+	remainder := line[firstSpace+1:]
+	if len(remainder) < 2 {
+		return ""
+	}
+	return remainder[1:]
+}
+
+func findUntrackedFiles(trackedFiles map[string]bool, config *Config) []string {
+	var untracked []string
+	err := filepath.Walk(".", func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return nil
+		}
+		if info.IsDir() {
+			return nil
+		}
+		relPath, err := filepath.Rel(".", path)
+		if err != nil {
+			relPath = path
+		}
+		if relPath == defaultOutputFile || relPath == config.output {
+			return nil
+		}
+		if !trackedFiles[relPath] {
+			untracked = append(untracked, relPath)
+		}
+		return nil
+	})
+	if err != nil {
+		return untracked
+	}
+	return untracked
 }
 
 func checkLine(line string, config *Config, lineNum int, hashFile string, output *os.File) bool {
@@ -551,10 +610,11 @@ The following four options are useful only when computing checksums:
       --tag                  create a BSD-style checksum
   -l, --length               digest length in bits; must be a multiple of 8
 
-The following three options are useful only when verifying checksums:
+The following four options are useful only when verifying checksums:
       --ignore-missing       don't fail or report status for missing files
       --strict               exit non-zero for improperly formatted checksum lines
   -w, --warn                 warn about improperly formatted checksum lines
+      --show-untracked       show files in filesystem not present in checksum file
 
 Sums are computed using the BLAKE3 algorithm. Full documentation at:
   <https://github.com/BLAKE3-team/BLAKE3>.

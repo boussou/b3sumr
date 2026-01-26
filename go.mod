@@ -1,4 +1,4 @@
-module b3rsum
+module b3sumr
 
 go 1.21
 

@@ -13,7 +13,51 @@ A high-performance Go implementation of b3rsum - a recursive BLAKE3 hash calcula
 - **BLAKE3 Hashing**: Fast and secure BLAKE3 algorithm
 - **Compatible Output**: Fully compatible with the bash version and standard hash tools
 - **Cross-Platform**: Builds on Linux, macOS, and Windows
+- **Untracked Files Detection**: Identify files in the filesystem not present in checksum file
 
+## Usage
+
+### Creating Checksums
+
+```bash
+# Hash all files in current directory recursively
+b3sumr
+
+# Hash specific directory
+b3sumr /path/to/directory
+
+# Output to custom file
+b3sumr -o checksums.txt
+
+# Use more workers for faster processing
+b3sumr -j 16
+```
+
+### Verifying Checksums
+
+```bash
+# Check using default BLAKE3SUMS file
+b3sumr -c
+
+# Check using custom checksum file
+b3sumr -c checksums.txt
+
+# Show files in filesystem not present in checksum file
+b3sumr -c --show-untracked
+
+# Quiet mode (only show failures)
+b3sumr -c -q
+
+# Very quiet mode (only exit code)
+b3sumr -c -s
+```
+
+### Check Mode Options
+
+- `--show-untracked`: Display files present in the filesystem but not listed in the BLAKE3SUMS file. Useful for detecting new or untracked files.
+- `--ignore-missing`: Don't fail for files listed in checksum file but missing from filesystem
+- `--strict`: Exit with non-zero status for improperly formatted checksum lines
+- `-w, --warn`: Warn about improperly formatted checksum lines
 
 ## Renamed the executable
 
