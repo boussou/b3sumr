@@ -205,6 +205,11 @@ func createMode(config *Config, paths []string) error {
 					return nil
 				}
 
+				// Skip symbolic links
+				if info.Mode()&os.ModeSymlink != 0 {
+					return nil
+				}
+
 				// Skip output file
 				if config.output != "" && filePath == config.output {
 					return nil
@@ -477,6 +482,10 @@ func findUntrackedFiles(trackedFiles map[string]bool, config *Config) []string {
 		if info.IsDir() {
 			return nil
 		}
+		// Skip symbolic links
+		if info.Mode()&os.ModeSymlink != 0 {
+			return nil
+		}
 		relPath, err := filepath.Rel(".", path)
 		if err != nil {
 			relPath = path
@@ -499,7 +508,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 	// Parse line format: hash mode filename
 	// We need to be careful with filenames that contain spaces
 	// The format is: "hash<space>mode<filename>" where mode is a single character
-	
+
 	// Find the first space (after hash)
 	firstSpace := strings.Index(line, " ")
 	if firstSpace == -1 || firstSpace == len(line)-1 {
@@ -511,7 +520,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 
 	expectedHash := line[:firstSpace]
 	remainder := line[firstSpace+1:]
-	
+
 	// The remainder should be "mode<filename>" where mode is a single character
 	if len(remainder) < 2 {
 		if config.warn && !config.status {
@@ -523,7 +532,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 	// Extract mode character and filename
 	mode := remainder[0]
 	filename := remainder[1:]
-	
+
 	// Validate mode character
 	if mode != '*' && mode != ' ' {
 		if config.warn && !config.status {
