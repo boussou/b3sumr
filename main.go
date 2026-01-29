@@ -538,7 +538,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 			return true
 		}
 		if !config.status {
-			fmt.Fprintf(os.Stderr, "%s: FAILED open or read\n", filename)
+			fmt.Fprintf(os.Stderr, "%s: FAILED file absent\n", filename)
 		}
 		return false
 	}
@@ -547,7 +547,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 	file, err := os.Open(filename)
 	if err != nil {
 		if !config.status {
-			fmt.Fprintf(os.Stderr, "%s: FAILED open or read\n", filename)
+			fmt.Fprintf(os.Stderr, "%s: FAILED could not open file\n", filename)
 		}
 		return false
 	}
@@ -556,7 +556,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string, output
 	actualHash, err := hashReader(file, config)
 	if err != nil {
 		if !config.status {
-			fmt.Fprintf(os.Stderr, "%s: FAILED read\n", filename)
+			fmt.Fprintf(os.Stderr, "%s: FAILED could not read file\n", filename)
 		}
 		return false
 	}
