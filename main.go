@@ -521,6 +521,11 @@ func countChecksumLines(hashFiles []string) (int64, bool) {
 			continue
 		}
 		scanner := bufio.NewScanner(f)
+		// Limit scanner buffer to 64KB to prevent unbounded memory growth on
+		// files with extremely long lines (e.g., huge base64-encoded content).
+		const maxCap = 1 << 16 // 64KB
+		buf := make([]byte, 0, 64)
+		scanner.Buffer(buf, maxCap)
 		for scanner.Scan() {
 			line := strings.TrimSpace(scanner.Text())
 			if line == "" || strings.HasPrefix(line, "#") || line == "#### Ended" {
@@ -607,6 +612,11 @@ func checkMode(config *Config, hashFiles []string) error {
 		}
 
 		scanner := bufio.NewScanner(file)
+		// Limit scanner buffer to 64KB to prevent unbounded memory growth on
+		// files with extremely long lines.
+		const maxCap = 1 << 16 // 64KB
+		buf := make([]byte, 0, 64)
+		scanner.Buffer(buf, maxCap)
 		lineNum := 0
 
 		for scanner.Scan() {
