@@ -235,8 +235,15 @@ func createMode(config *Config, paths []string) error {
 
 			err := filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 				if err != nil {
+					// Report the error but keep walking the rest of the tree
+					// (returning err here would abort the entire walk, not just
+					// this subtree, e.g. on a permission-denied directory).
 					if !config.ignoreMissing {
-						return err
+						relPath, relErr := filepath.Rel(".", filePath)
+						if relErr != nil {
+							relPath = filePath
+						}
+						results <- HashResult{filename: relPath, err: err}
 					}
 					return nil
 				}
