@@ -4,14 +4,12 @@ import (
 	"bufio"
 	"flag"
 	"fmt"
-	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
-
-	"github.com/zeebo/blake3"
 )
 
 const (
@@ -162,12 +160,31 @@ func createMode(config *Config, paths []string) error {
 		defer close(jobs)
 		for _, path := range paths {
 			if path == "-" {
-				// Handle stdin
-				hash, err := hashReader(os.Stdin, config)
+				// Handle stdin by using b3sum with stdin
+				args := []string{}
+				if config.binary {
+					args = append(args, "--binary")
+				}
+				if config.text {
+					args = append(args, "--text")
+				}
+				if config.length != 256 {
+					args = append(args, "--length", fmt.Sprintf("%d", config.length))
+				}
+				args = append(args, "-")
+				
+				cmd := exec.Command("b3sum", args...)
+				cmd.Stdin = os.Stdin
+				output, err := cmd.Output()
 				if err != nil {
-					results <- HashResult{err: err}
+					results <- HashResult{err: fmt.Errorf("b3sum command failed: %v", err)}
 				} else {
-					results <- HashResult{hash: hash, filename: "-"}
+					parts := strings.SplitN(strings.TrimSpace(string(output)), "  ", 2)
+					if len(parts) < 1 {
+						results <- HashResult{err: fmt.Errorf("invalid b3sum output format")}
+					} else {
+						results <- HashResult{hash: parts[0], filename: "-"}
+					}
 				}
 				continue
 			}
@@ -224,14 +241,7 @@ func hashWorker(jobs <-chan FileJob, results chan<- HashResult, config *Config, 
 	defer wg.Done()
 
 	for job := range jobs {
-		file, err := os.Open(job.path)
-		if err != nil {
-			results <- HashResult{filename: job.relative, err: err}
-			continue
-		}
-
-		hash, err := hashReader(file, config)
-		file.Close()
+		hash, err := hashFile(job.path, config)
 
 		if err != nil {
 			results <- HashResult{filename: job.relative, err: err}
@@ -241,24 +251,36 @@ func hashWorker(jobs <-chan FileJob, results chan<- HashResult, config *Config, 
 	}
 }
 
-func hashReader(reader io.Reader, config *Config) (string, error) {
-	hasher := blake3.New()
-	_, err := io.Copy(hasher, reader)
-	if err != nil {
-		return "", err
-	}
-
-	hash := hasher.Sum(nil)
+func hashFile(filename string, config *Config) (string, error) {
+	// Build b3sum command arguments
+	args := []string{}
 	
-	// Truncate to specified length if needed
-	if config.length < 256 && config.length > 0 {
-		bitLength := config.length / 8
-		if bitLength < len(hash) {
-			hash = hash[:bitLength]
-		}
+	if config.binary {
+		args = append(args, "--binary")
 	}
-
-	return fmt.Sprintf("%x", hash), nil
+	if config.text {
+		args = append(args, "--text")
+	}
+	if config.length != 256 {
+		args = append(args, "--length", fmt.Sprintf("%d", config.length))
+	}
+	
+	args = append(args, filename)
+	
+	// Execute b3sum command
+	cmd := exec.Command("b3sum", args...)
+	output, err := cmd.Output()
+	if err != nil {
+		return "", fmt.Errorf("b3sum command failed: %v", err)
+	}
+	
+	// Parse output (format: "hash  filename")
+	parts := strings.SplitN(strings.TrimSpace(string(output)), "  ", 2)
+	if len(parts) < 1 {
+		return "", fmt.Errorf("invalid b3sum output format")
+	}
+	
+	return parts[0], nil
 }
 
 func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGroup) {
@@ -301,7 +323,7 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 	}
 }
 
-func checkMode(config *Config, hashFiles []string) error {
+func checkMode(config *Config, checksumFiles []string) error {
 	if !config.quiet && !config.status {
 		fmt.Fprintf(os.Stderr, "b3rsum v%s Copyright (C) 2024 HacKan (https://hackan.net)\n\n", version)
 		if config.output != "" {
@@ -311,20 +333,19 @@ func checkMode(config *Config, hashFiles []string) error {
 
 	var allOk = true
 
-	for _, hashFile := range hashFiles {
+	for _, checksumFile := range checksumFiles {
 		var file *os.File
 		var err error
-
-		if hashFile == "-" {
+		
+		if checksumFile == "-" {
 			file = os.Stdin
 		} else {
-			file, err = os.Open(hashFile)
+			file, err = os.Open(checksumFile)
 			if err != nil {
 				if !config.status {
-					fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", hashFile, err)
+					fmt.Fprintf(os.Stderr, "Error opening %s: %v\n", checksumFile, err)
 				}
-				allOk = false
-				continue
+				return err
 			}
 			defer file.Close()
 		}
@@ -339,7 +360,7 @@ func checkMode(config *Config, hashFiles []string) error {
 				continue
 			}
 
-			ok := checkLine(line, config, lineNum, hashFile)
+			ok := checkLine(line, config, lineNum, checksumFile)
 			if !ok {
 				allOk = false
 			}
@@ -347,7 +368,7 @@ func checkMode(config *Config, hashFiles []string) error {
 
 		if err := scanner.Err(); err != nil {
 			if !config.status {
-				fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", hashFile, err)
+				fmt.Fprintf(os.Stderr, "Error reading %s: %v\n", checksumFile, err)
 			}
 			allOk = false
 		}
@@ -360,12 +381,12 @@ func checkMode(config *Config, hashFiles []string) error {
 	return nil
 }
 
-func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
+func checkLine(line string, config *Config, lineNum int, checksumFile string) bool {
 	// Parse line format: hash mode filename
 	parts := strings.Fields(line)
 	if len(parts) < 2 {
 		if config.warn && !config.status {
-			fmt.Fprintf(os.Stderr, "%s:%d: improperly formatted line\n", hashFile, lineNum)
+			fmt.Fprintf(os.Stderr, "%s:%d: improperly formatted line\n", checksumFile, lineNum)
 		}
 		return !config.strict
 	}
@@ -390,16 +411,7 @@ func checkLine(line string, config *Config, lineNum int, hashFile string) bool {
 	}
 
 	// Calculate actual hash
-	file, err := os.Open(filename)
-	if err != nil {
-		if !config.status {
-			fmt.Fprintf(os.Stderr, "%s: FAILED open or read\n", filename)
-		}
-		return false
-	}
-	defer file.Close()
-
-	actualHash, err := hashReader(file, config)
+	actualHash, err := hashFile(filename, config)
 	if err != nil {
 		if !config.status {
 			fmt.Fprintf(os.Stderr, "%s: FAILED read\n", filename)

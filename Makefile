@@ -10,7 +10,7 @@ SOURCE_FILES = main.go
 all: build
 
 build:
-	go build -o $(BINARY_NAME) $(SOURCE_FILES)
+	go build -o b3rsum main.go
 
 clean:
 	rm -f $(BINARY_NAME)
@@ -33,8 +33,8 @@ vet:
 	go vet ./...
 
 deps:
-	go mod tidy
-	go mod download
+	@echo "No external dependencies required - using b3sum command"
+	@which b3sum > /dev/null || (echo "Error: b3sum command not found. Please install BLAKE3 tools." && exit 1)
 
 release: clean fmt vet
 	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o $(BINARY_NAME)-linux-amd64 $(SOURCE_FILES)
