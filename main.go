@@ -36,6 +36,7 @@ type Config struct {
 	workers       int
 	showUntracked bool
 	interval      float64
+	progressBar   bool
 }
 
 type FileJob struct {
@@ -114,6 +115,7 @@ func parseFlags() *Config {
 	flag.IntVar(&config.workers, "jobs", runtime.NumCPU(), "number of parallel workers")
 	flag.Float64Var(&config.interval, "i", 1.0, "progress update interval in seconds (0 to disable)")
 	flag.Float64Var(&config.interval, "interval", 1.0, "progress update interval in seconds (0 to disable)")
+	flag.BoolVar(&config.progressBar, "progress-bar", false, "show a two-pass percentage progress bar instead of the interval ticker")
 
 	var showVersion, showHelp, showLicense bool
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
@@ -167,6 +169,39 @@ func createMode(config *Config, paths []string) error {
 		}
 	}
 
+	// Pre-scan pass to count total eligible files for the progress bar.
+	// Skipped if any path is stdin ("-"), since a pre-scan is not meaningful there.
+	var totalFiles int64
+	if config.progressBar {
+		hasStdin := false
+		for _, path := range paths {
+			if path == "-" {
+				hasStdin = true
+				break
+			}
+		}
+		if !hasStdin {
+			for _, path := range paths {
+				filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+					if err != nil {
+						return nil
+					}
+					if info.IsDir() {
+						return nil
+					}
+					if !info.Mode().IsRegular() {
+						return nil
+					}
+					if config.output != "" && filePath == config.output {
+						return nil
+					}
+					totalFiles++
+					return nil
+				})
+			}
+		}
+	}
+
 	// Channel for file jobs
 	jobs := make(chan FileJob, 1000)
 	results := make(chan HashResult, 1000)
@@ -181,7 +216,7 @@ func createMode(config *Config, paths []string) error {
 	// Start result collector goroutine
 	var collectorWg sync.WaitGroup
 	collectorWg.Add(1)
-	go resultCollector(results, config, &collectorWg)
+	go resultCollector(results, config, totalFiles, &collectorWg)
 
 	// Walk directories and send jobs
 	go func() {
@@ -336,7 +371,50 @@ func startProgressTicker(config *Config, processed, errors *int64, stop <-chan s
 	}
 }
 
-func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGroup) {
+func renderProgressBar(processed, total int64) string {
+	const width = 30
+	pct := 0.0
+	if total > 0 {
+		pct = float64(processed) / float64(total) * 100
+	}
+	if pct > 100 {
+		pct = 100
+	}
+	filled := int(float64(width) * pct / 100)
+	if filled > width {
+		filled = width
+	}
+	bar := strings.Repeat("#", filled) + strings.Repeat("-", width-filled)
+	return fmt.Sprintf("[%s] %5.1f%% (%d/%d)", bar, pct, processed, total)
+}
+
+func startProgressBar(success, errors *int64, total int64, interval float64, stop <-chan struct{}) {
+	if interval <= 0 {
+		interval = 1.0
+	}
+	ticker := time.NewTicker(time.Duration(interval * float64(time.Second)))
+	defer ticker.Stop()
+
+	render := func() {
+		s := atomic.LoadInt64(success)
+		e := atomic.LoadInt64(errors)
+		processed := s + e
+		fmt.Fprintf(os.Stderr, "\r%s (%d errors)", renderProgressBar(processed, total), e)
+	}
+
+	for {
+		select {
+		case <-ticker.C:
+			render()
+		case <-stop:
+			render()
+			fmt.Fprintln(os.Stderr)
+			return
+		}
+	}
+}
+
+func resultCollector(results <-chan HashResult, config *Config, progressTotal int64, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	var output *os.File
@@ -354,10 +432,23 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 		output = os.Stdout
 	}
 
-	var stopProgress chan struct{}
-	if config.interval > 0 && !config.quiet && !config.status {
-		stopProgress = make(chan struct{})
-		go startProgressTicker(config, &processedFiles, &errorFiles, stopProgress)
+	var stopProgress, progressDone chan struct{}
+	if !config.quiet && !config.status {
+		if config.progressBar && progressTotal > 0 {
+			stopProgress = make(chan struct{})
+			progressDone = make(chan struct{})
+			go func() {
+				startProgressBar(&processedFiles, &errorFiles, progressTotal, config.interval, stopProgress)
+				close(progressDone)
+			}()
+		} else if config.interval > 0 {
+			stopProgress = make(chan struct{})
+			progressDone = make(chan struct{})
+			go func() {
+				startProgressTicker(config, &processedFiles, &errorFiles, stopProgress)
+				close(progressDone)
+			}()
+		}
 	}
 
 	for result := range results {
@@ -387,6 +478,7 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 
 	if stopProgress != nil {
 		close(stopProgress)
+		<-progressDone
 	}
 
 	// Display summary
@@ -397,6 +489,32 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 		fmt.Fprintf(os.Stderr, "Files with errors: %d\n", errorFiles)
 	}
 	fmt.Fprintf(os.Stderr, "#### Ended\n")
+}
+
+// countChecksumLines pre-scans checksum files to count checkable lines for the
+// progress bar. Returns ok=false if any input is stdin ("-"), since it cannot
+// be scanned twice.
+func countChecksumLines(hashFiles []string) (int64, bool) {
+	var total int64
+	for _, hashFile := range hashFiles {
+		if hashFile == "-" {
+			return 0, false
+		}
+		f, err := os.Open(hashFile)
+		if err != nil {
+			continue
+		}
+		scanner := bufio.NewScanner(f)
+		for scanner.Scan() {
+			line := strings.TrimSpace(scanner.Text())
+			if line == "" || strings.HasPrefix(line, "#") || line == "#### Ended" {
+				continue
+			}
+			total++
+		}
+		f.Close()
+	}
+	return total, true
 }
 
 func checkMode(config *Config, hashFiles []string) error {
@@ -427,11 +545,29 @@ func checkMode(config *Config, hashFiles []string) error {
 	var totalFiles, okFiles, failedFiles int64
 	trackedFiles := make(map[string]bool)
 
-	var stopProgress chan struct{}
-	if config.interval > 0 && !config.quiet && !config.status {
-		stopProgress = make(chan struct{})
-		go startProgressTicker(config, &okFiles, &failedFiles, stopProgress)
-		defer close(stopProgress)
+	var progressTotal int64
+	canProgressBar := false
+	if config.progressBar {
+		progressTotal, canProgressBar = countChecksumLines(hashFiles)
+	}
+
+	var stopProgress, progressDone chan struct{}
+	if !config.quiet && !config.status {
+		if config.progressBar && canProgressBar && progressTotal > 0 {
+			stopProgress = make(chan struct{})
+			progressDone = make(chan struct{})
+			go func() {
+				startProgressBar(&okFiles, &failedFiles, progressTotal, config.interval, stopProgress)
+				close(progressDone)
+			}()
+		} else if config.interval > 0 {
+			stopProgress = make(chan struct{})
+			progressDone = make(chan struct{})
+			go func() {
+				startProgressTicker(config, &okFiles, &failedFiles, stopProgress)
+				close(progressDone)
+			}()
+		}
 	}
 
 	for _, hashFile := range hashFiles {
@@ -483,6 +619,11 @@ func checkMode(config *Config, hashFiles []string) error {
 			}
 			allOk = false
 		}
+	}
+
+	if stopProgress != nil {
+		close(stopProgress)
+		<-progressDone
 	}
 
 	// Find untracked files if requested
@@ -665,6 +806,8 @@ Options:
   -j, --jobs N               number of parallel workers (default: %d for your CPU)
   -i, --interval SECONDS     progress update interval in seconds (default: 1.0,
                              0 to disable); suppressed by -q/-s
+      --progress-bar         show a two-pass percentage progress bar instead
+                             of the interval ticker; suppressed by -q/-s
       --license              show license and exit
       --version              show version information and exit
   -h, --help                 show this text and exit
