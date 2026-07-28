@@ -12,8 +12,16 @@ all: build
 build:
 	go build -o b3rsum main.go
 
+# Build for Debian 9 compatibility (static binary)
+build-debian9:
+	CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -ldflags="-w -s" -o b3rsum-debian9 main.go
+
+# Build static binary for maximum compatibility
+build-static:
+	CGO_ENABLED=0 go build -ldflags="-w -s" -o b3rsum-static main.go
+
 clean:
-	rm -f $(BINARY_NAME)
+	rm -f $(BINARY_NAME) b3rsum b3rsum-debian9 b3rsum-static
 	go clean
 
 install: build

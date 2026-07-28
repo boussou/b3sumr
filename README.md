@@ -48,13 +48,43 @@ sudo cp target/release/b3sum /usr/local/bin/
 
 2. Build the Go binary:
 ```bash
+# Regular build (for current system)
 make build
+
+# Build for Debian 9 compatibility (cross-compiled static binary)
+make build-debian9
+
+# Build static binary for maximum compatibility
+make build-static
 ```
 
 3. Install system-wide (optional):
 ```bash
 sudo make install
 ```
+
+### Deploying to Debian 9
+
+To run on Debian 9 even when built on a newer system:
+
+1. Build the cross-compiled binary on any system with Go:
+```bash
+make build-debian9
+```
+
+2. Copy the `b3rsum-debian9` binary to your Debian 9 system:
+```bash
+scp b3rsum-debian9 user@debian9-host:/usr/local/bin/b3rsum
+```
+
+3. Make sure `b3sum` is installed on the Debian 9 system:
+```bash
+# On the Debian 9 system
+sudo apt update
+sudo apt install b3sum
+```
+
+The `b3rsum-debian9` binary is statically linked and will run on Debian 9 without requiring Go to be installed on the target system.
 
 Note: This implementation does not use Go modules and is compatible with older Go versions including Go 1.7.4 (Debian 9).
 
