@@ -449,7 +449,7 @@ func resultCollector(results <-chan HashResult, config *Config, progressTotal in
 	}
 
 	var stopProgress, progressDone chan struct{}
-	if !config.quiet && !config.status {
+	if !config.status && (!config.quiet || config.progressBar) {
 		if config.progressBar && progressTotal > 0 {
 			stopProgress = make(chan struct{})
 			progressDone = make(chan struct{})
@@ -570,7 +570,7 @@ func checkMode(config *Config, hashFiles []string) error {
 	}
 
 	var stopProgress, progressDone chan struct{}
-	if !config.quiet && !config.status {
+	if !config.status && (!config.quiet || config.progressBar) {
 		if config.progressBar && canProgressBar && progressTotal > 0 {
 			stopProgress = make(chan struct{})
 			progressDone = make(chan struct{})

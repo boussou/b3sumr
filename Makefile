@@ -17,8 +17,8 @@ clean:
 	go clean
 
 install: build
-	install -v -d "$(DESTDIR)$(BINDIR)/"
-	install -m 0755 -v $(BINARY_NAME) "$(DESTDIR)$(BINDIR)/$(BINARY_NAME)"
+	sudo install -v -d "$(DESTDIR)$(BINDIR)/"
+	sudo install -m 0755 -v $(BINARY_NAME) "$(DESTDIR)$(BINDIR)/$(BINARY_NAME)"
 
 uninstall:
 	rm -vf "$(DESTDIR)$(BINDIR)/$(BINARY_NAME)"
