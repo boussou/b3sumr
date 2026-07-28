@@ -566,7 +566,10 @@ func checkMode(config *Config, hashFiles []string) error {
 
 	var allOk = true
 	var totalFiles, okFiles, failedFiles int64
-	trackedFiles := make(map[string]bool)
+	var trackedFiles map[string]bool
+	if config.showUntracked {
+		trackedFiles = make(map[string]bool)
+	}
 
 	var progressTotal int64
 	canProgressBar := false
@@ -626,9 +629,12 @@ func checkMode(config *Config, hashFiles []string) error {
 				continue
 			}
 
-			filename := extractFilename(line)
-			if filename != "" {
-				trackedFiles[filename] = true
+			if config.showUntracked {
+				filename := extractFilename(line)
+				if filename != "" {
+					// Clone so the map key does not keep the whole checksum line alive.
+					trackedFiles[strings.Clone(filename)] = true
+				}
 			}
 
 			ok := checkLine(line, config, lineNum, hashFile, output)
