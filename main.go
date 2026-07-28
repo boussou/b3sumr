@@ -10,6 +10,8 @@ import (
 	"runtime"
 	"strings"
 	"sync"
+	"sync/atomic"
+	"time"
 
 	"github.com/zeebo/blake3"
 )
@@ -33,6 +35,7 @@ type Config struct {
 	warn          bool
 	workers       int
 	showUntracked bool
+	interval      float64
 }
 
 type FileJob struct {
@@ -109,6 +112,8 @@ func parseFlags() *Config {
 	flag.BoolVar(&config.showUntracked, "show-untracked", false, "show files in filesystem not present in checksum file")
 	flag.IntVar(&config.workers, "j", runtime.NumCPU(), "number of parallel workers")
 	flag.IntVar(&config.workers, "jobs", runtime.NumCPU(), "number of parallel workers")
+	flag.Float64Var(&config.interval, "i", 1.0, "progress update interval in seconds (0 to disable)")
+	flag.Float64Var(&config.interval, "interval", 1.0, "progress update interval in seconds (0 to disable)")
 
 	var showVersion, showHelp, showLicense bool
 	flag.BoolVar(&showVersion, "version", false, "show version information and exit")
@@ -308,12 +313,35 @@ func hashReader(reader io.Reader, config *Config) (string, error) {
 	return fmt.Sprintf("%x", hash), nil
 }
 
+func startProgressTicker(config *Config, processed, errors *int64, stop <-chan struct{}) {
+	ticker := time.NewTicker(time.Duration(config.interval * float64(time.Second)))
+	defer ticker.Stop()
+
+	startTime := time.Now()
+
+	for {
+		select {
+		case <-ticker.C:
+			elapsed := time.Since(startTime).Seconds()
+			p := atomic.LoadInt64(processed)
+			e := atomic.LoadInt64(errors)
+			rate := float64(0)
+			if elapsed > 0 {
+				rate = float64(p) / elapsed
+			}
+			fmt.Fprintf(os.Stderr, "Processed %d files in %.1fs (%.0f files/s, %d errors)\n", p, elapsed, rate, e)
+		case <-stop:
+			return
+		}
+	}
+}
+
 func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGroup) {
 	defer wg.Done()
 
 	var output *os.File
 	var err error
-	var totalFiles, processedFiles, errorFiles int
+	var totalFiles, processedFiles, errorFiles int64
 
 	if config.output != "" {
 		output, err = os.Create(config.output)
@@ -326,17 +354,23 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 		output = os.Stdout
 	}
 
+	var stopProgress chan struct{}
+	if config.interval > 0 && !config.quiet && !config.status {
+		stopProgress = make(chan struct{})
+		go startProgressTicker(config, &processedFiles, &errorFiles, stopProgress)
+	}
+
 	for result := range results {
-		totalFiles++
+		atomic.AddInt64(&totalFiles, 1)
 		if result.err != nil {
-			errorFiles++
+			atomic.AddInt64(&errorFiles, 1)
 			if !config.status {
 				fmt.Fprintf(os.Stderr, "Error processing %s: %v\n", result.filename, result.err)
 			}
 			continue
 		}
 
-		processedFiles++
+		atomic.AddInt64(&processedFiles, 1)
 		var line string
 		if config.tag {
 			line = fmt.Sprintf("BLAKE3 (%s) = %s\n", result.filename, result.hash)
@@ -349,6 +383,10 @@ func resultCollector(results <-chan HashResult, config *Config, wg *sync.WaitGro
 		}
 
 		output.WriteString(line)
+	}
+
+	if stopProgress != nil {
+		close(stopProgress)
 	}
 
 	// Display summary
@@ -386,8 +424,15 @@ func checkMode(config *Config, hashFiles []string) error {
 	}
 
 	var allOk = true
-	var totalFiles, okFiles, failedFiles int
+	var totalFiles, okFiles, failedFiles int64
 	trackedFiles := make(map[string]bool)
+
+	var stopProgress chan struct{}
+	if config.interval > 0 && !config.quiet && !config.status {
+		stopProgress = make(chan struct{})
+		go startProgressTicker(config, &okFiles, &failedFiles, stopProgress)
+		defer close(stopProgress)
+	}
 
 	for _, hashFile := range hashFiles {
 		var file *os.File
@@ -423,11 +468,11 @@ func checkMode(config *Config, hashFiles []string) error {
 			}
 
 			ok := checkLine(line, config, lineNum, hashFile, output)
-			totalFiles++
+			atomic.AddInt64(&totalFiles, 1)
 			if ok {
-				okFiles++
+				atomic.AddInt64(&okFiles, 1)
 			} else {
-				failedFiles++
+				atomic.AddInt64(&failedFiles, 1)
 				allOk = false
 			}
 		}
@@ -618,6 +663,8 @@ Options:
   -s, --status               very quiet mode: output only hashes, no messages;
                              status code shows success
   -j, --jobs N               number of parallel workers (default: %d for your CPU)
+  -i, --interval SECONDS     progress update interval in seconds (default: 1.0,
+                             0 to disable); suppressed by -q/-s
       --license              show license and exit
       --version              show version information and exit
   -h, --help                 show this text and exit
