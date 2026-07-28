@@ -181,6 +181,8 @@ func createMode(config *Config, paths []string) error {
 			}
 		}
 		if !hasStdin {
+			showScanCounter := !config.quiet && !config.status
+			var lastPrint time.Time
 			for _, path := range paths {
 				filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
 					if err != nil {
@@ -196,8 +198,15 @@ func createMode(config *Config, paths []string) error {
 						return nil
 					}
 					totalFiles++
+					if showScanCounter && time.Since(lastPrint) >= 100*time.Millisecond {
+						fmt.Fprintf(os.Stderr, "\rScanning: %d files found...", totalFiles)
+						lastPrint = time.Now()
+					}
 					return nil
 				})
+			}
+			if showScanCounter {
+				fmt.Fprintf(os.Stderr, "\rScanning: %d files found.    \n", totalFiles)
 			}
 		}
 	}
@@ -519,6 +528,8 @@ func countChecksumLines(hashFiles []string) (int64, bool) {
 			}
 			total++
 		}
+		// Best-effort pre-scan; the actual verification pass reports read errors.
+		_ = scanner.Err()
 		f.Close()
 	}
 	return total, true
