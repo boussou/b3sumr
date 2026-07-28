@@ -15,7 +15,7 @@ import (
 )
 
 const (
-	version           = "0.3.0"
+	version           = "0.3.2"
 	defaultOutputFile = "BLAKE3SUMS"
 )
 
@@ -205,8 +205,8 @@ func createMode(config *Config, paths []string) error {
 					return nil
 				}
 
-				// Skip symbolic links
-				if info.Mode()&os.ModeSymlink != 0 {
+				// Skip non-regular files (symbolic links, sockets, FIFOs, devices, etc.)
+				if !info.Mode().IsRegular() {
 					return nil
 				}
 
@@ -262,6 +262,15 @@ func hashWorker(jobs <-chan FileJob, results chan<- HashResult, config *Config, 
 	defer wg.Done()
 
 	for job := range jobs {
+		info, err := os.Lstat(job.path)
+		if err != nil || !info.Mode().IsRegular() {
+			if err == nil {
+				err = fmt.Errorf("not a regular file")
+			}
+			results <- HashResult{filename: job.relative, err: err}
+			continue
+		}
+
 		file, err := os.Open(job.path)
 		if err != nil {
 			results <- HashResult{filename: job.relative, err: err}
@@ -482,8 +491,8 @@ func findUntrackedFiles(trackedFiles map[string]bool, config *Config) []string {
 		if info.IsDir() {
 			return nil
 		}
-		// Skip symbolic links
-		if info.Mode()&os.ModeSymlink != 0 {
+		// Skip non-regular files (symbolic links, sockets, FIFOs, devices, etc.)
+		if !info.Mode().IsRegular() {
 			return nil
 		}
 		relPath, err := filepath.Rel(".", path)
